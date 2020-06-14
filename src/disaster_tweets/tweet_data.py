@@ -29,7 +29,7 @@ class TweetVectorizer(object):
         for tweet in tweet_df.text:
             for word in tokenize(tweet):
                 tweet_vocab.add(word)
-        
+
         return cls(tweet_vocab)
 
     def vectorize(self, tweet: str) -> np.array:
@@ -73,12 +73,19 @@ class DisasterTweetDataset(Dataset):
         x_data = self.tweet_vectorizer.vectorize(row.text)
         y_target = row.target
 
-        return {'x_data': x_data, 'y_target': y_target}
+        return {"x_data": x_data, "y_target": y_target}
 
 
-def generate_batches(dataset: Dataset, batch_size: int, shuffle: bool = True, drop_last: bool = True, device: str = "cpu"):
-    dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
+def generate_batches(
+    dataset: Dataset,
+    batch_size: int,
+    shuffle: bool = True,
+    drop_last: bool = True,
+    device: str = "cpu",
+):
+    dataloader = DataLoader(
+        dataset=dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last
+    )
 
     for data_dict in dataloader:
         yield {name: tensor.to(device) for name, tensor in data_dict.items()}
-    

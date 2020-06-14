@@ -1,9 +1,10 @@
-
 DEFAULT_UNKNOWN_TOKEN = "<UNK>"
 
 
 class Vocabulary(object):
-    def __init__(self, token_map=None, add_unknown=True, unknown_token=DEFAULT_UNKNOWN_TOKEN) -> None:
+    def __init__(
+        self, token_map=None, add_unknown=True, unknown_token=DEFAULT_UNKNOWN_TOKEN
+    ) -> None:
         if token_map is None:
             token_map = {}
         self.token_map = token_map
@@ -36,4 +37,3 @@ class Vocabulary(object):
 
     def __len__(self) -> int:
         return len(self.token_map)
-        

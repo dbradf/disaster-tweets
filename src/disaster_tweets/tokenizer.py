@@ -1,6 +1,6 @@
 import spacy
 
-nlp = spacy.load('en')
+nlp = spacy.load("en")
 
 
 def tokenize(text: str) -> [str]:

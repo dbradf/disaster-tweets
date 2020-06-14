@@ -36,7 +36,7 @@ def create_pipeline(classifier: BaseEstimator) -> Pipeline:
                     ("location", OneHotEncoder(handle_unknown="ignore"), ["location"]),
                 ],
                 remainder="drop",
-                transformer_weights={"text": 1, "keyword": 0, "location": 0}
+                transformer_weights={"text": 1, "keyword": 0, "location": 0},
             ),
         ),
         ("classifier", classifier),
@@ -97,7 +97,7 @@ def train(ctx, train_percent, save):
         # ("GradientBoosting", GradientBoostingClassifier()),
     ]
     voter = VotingClassifier(voter_models, n_jobs=-1)
-    
+
     voter_model = train_model("Voter", voter, train, test)
 
     if save:
