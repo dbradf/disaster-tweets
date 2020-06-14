@@ -9,6 +9,7 @@ repository = "https://github.com/..."
 
 [tool.poetry.scripts]
 cli = 'disaster_tweets.cli:main'
+deep = 'disaster_tweets.deep:main'
 
 [tool.poetry.dependencies]
 python = "^3.7"
@@ -17,6 +18,8 @@ numpy = "^1.18.4"
 pandas = "^1.0.3"
 scikit-learn = "^0.23.0"
 spacy = "^2.2.4"
+torch = "^1.5.0"
+tqdm = "^4.46.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.3"

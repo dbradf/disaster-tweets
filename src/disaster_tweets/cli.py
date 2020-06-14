@@ -16,19 +16,9 @@ from sklearn.linear_model import SGDClassifier, RidgeClassifier
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 
+from disaster_tweets.tokenizer import tokenize
 
 TARGET = "target"
-
-nlp = spacy.load('en')
-
-
-def tokenize(text):
-    tokens = [token for token in nlp(text) if not token.is_stop]
-    for token in tokens:
-        yield token.norm_
-    for token, token2 in zip(tokens, tokens[1:]):
-        yield f"{token.norm_} {token2.norm_}"
-    # return [token.norm_ for token in tokens if not token.is_stop]
 
 
 def create_pipeline(classifier: BaseEstimator) -> Pipeline:
@@ -46,6 +36,7 @@ def create_pipeline(classifier: BaseEstimator) -> Pipeline:
                     ("location", OneHotEncoder(handle_unknown="ignore"), ["location"]),
                 ],
                 remainder="drop",
+                transformer_weights={"text": 1, "keyword": 0, "location": 0}
             ),
         ),
         ("classifier", classifier),
