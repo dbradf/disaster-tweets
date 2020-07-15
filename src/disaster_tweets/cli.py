@@ -1,5 +1,6 @@
 from datetime import datetime
 import pickle
+from typing import Optional
 
 import click
 import pandas as pd
@@ -7,6 +8,7 @@ import spacy
 
 from sklearn.base import BaseEstimator
 from sklearn.compose import ColumnTransformer
+from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
@@ -21,7 +23,9 @@ from disaster_tweets.tokenizer import tokenize
 TARGET = "target"
 
 
-def create_pipeline(classifier: BaseEstimator) -> Pipeline:
+def create_pipeline(
+    classifier: BaseEstimator, n_grams: int = 1, reduction: Optional[int] = None
+) -> Pipeline:
     steps = [
         (
             "column",
@@ -29,7 +33,12 @@ def create_pipeline(classifier: BaseEstimator) -> Pipeline:
                 [
                     (
                         "text",
-                        TfidfVectorizer(tokenizer=tokenize, preprocessor=None, lowercase=False),
+                        TfidfVectorizer(
+                            tokenizer=tokenize,
+                            preprocessor=None,
+                            lowercase=False,
+                            ngram_range=(1, n_grams),
+                        ),
                         "text",
                     ),
                     ("keyword", OneHotEncoder(handle_unknown="ignore"), ["keyword"]),
@@ -39,8 +48,12 @@ def create_pipeline(classifier: BaseEstimator) -> Pipeline:
                 transformer_weights={"text": 1, "keyword": 0, "location": 0},
             ),
         ),
-        ("classifier", classifier),
     ]
+
+    if reduction is not None:
+        steps.append(("reduction", TruncatedSVD(n_components=reduction)))
+
+    steps.append(("classifier", classifier))
 
     return Pipeline(steps)
 
@@ -55,10 +68,10 @@ def cli(ctx, dataset_file):
     ctx.obj["dataset"] = dataset
 
 
-def train_model(name, clf, train, test):
+def train_model(name, clf, train, test, **kwargs):
     print(f"{name}...")
     start = datetime.now()
-    model = create_pipeline(clf)
+    model = create_pipeline(clf, **kwargs)
     model.fit(train, train[TARGET])
     end = datetime.now()
 
@@ -71,34 +84,36 @@ def train_model(name, clf, train, test):
 
 @cli.command()
 @click.option("--train-percent", type=float, default=0.8)
+@click.option("--n-grams", type=int, default=1)
 @click.option("--save")
 @click.pass_context
-def train(ctx, train_percent, save):
+def train(ctx, train_percent, save, n_grams):
     dataset: pd.DataFrame = ctx.obj["dataset"]
 
     train, test = train_test_split(dataset, train_size=train_percent, shuffle=True)
 
     models = {
-        "SGD": SGDClassifier(n_jobs=10),
-        "SGD Log Loss": SGDClassifier(loss="log", n_jobs=10),
-        "Random Forest": RandomForestClassifier(n_estimators=100, n_jobs=-1),
+        "SGD": SGDClassifier(n_jobs=-1),
+        "SGD Log Loss": SGDClassifier(loss="log", n_jobs=-1),
+        "Random Forest": RandomForestClassifier(n_estimators=500, n_jobs=-1),
         "SVM": SVC(),
         "Ridge": RidgeClassifier(),
         "GradientBoosting": GradientBoostingClassifier(),
     }
-    trained_models = {name: train_model(name, clf, train, test) for name, clf in models.items()}
+
+    {name: train_model(name, clf, train, test, n_grams=n_grams) for name, clf in models.items()}
 
     voter_models = [
-        ("SGD", SGDClassifier(n_jobs=10)),
-        ("SGD Log Loss", SGDClassifier(loss="log", n_jobs=10)),
-        ("Random Forest", RandomForestClassifier(n_estimators=100, n_jobs=-1)),
+        ("SGD", SGDClassifier(n_jobs=-10)),
+        ("SGD Log Loss", SGDClassifier(loss="log", n_jobs=-10)),
+        ("Random Forest", RandomForestClassifier(n_estimators=500, n_jobs=-1)),
         ("SVM", SVC()),
         ("Ridge", RidgeClassifier()),
         # ("GradientBoosting", GradientBoostingClassifier()),
     ]
     voter = VotingClassifier(voter_models, n_jobs=-1)
 
-    voter_model = train_model("Voter", voter, train, test)
+    voter_model = train_model("Voter", voter, train, test, n_grams=n_grams)
 
     if save:
         with open(save, "wb") as f:
