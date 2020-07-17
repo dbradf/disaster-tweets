@@ -6,6 +6,7 @@ from typing import Dict, Any
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import torch
 from torch.utils.data import Dataset, DataLoader
 
 from disaster_tweets.vocab import Vocabulary
@@ -71,7 +72,7 @@ class DisasterTweetDataset(Dataset):
     def __getitem__(self, index: int) -> Dict[str, Any]:
         row = self.dataset[self.target].iloc[index]
         x_data = self.tweet_vectorizer.vectorize(row.text)
-        y_target = row.target
+        y_target = float(row.target)
 
         return {"x_data": x_data, "y_target": y_target}
 
@@ -81,11 +82,15 @@ def generate_batches(
     batch_size: int,
     shuffle: bool = True,
     drop_last: bool = True,
-    device: str = "cpu",
+    device: torch.device = torch.device("cpu"),
 ):
     dataloader = DataLoader(
         dataset=dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last
     )
 
     for data_dict in dataloader:
-        yield {name: tensor.to(device) for name, tensor in data_dict.items()}
+        out_data_dict = {}
+        for name, tensor in data_dict.items():
+            out_data_dict[name] = data_dict[name].to(device)
+
+        yield out_data_dict

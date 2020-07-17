@@ -1,24 +1,31 @@
+from datetime import datetime
+
 import click
 import torch
+from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
-from torch.nn import Module, Linear, BCEWithLogitsLoss
-from torch.nn.functional import sigmoid
-from torch.optim import Optimizer, Adam
-from torch.utils.data import DataLoader
+import torch.nn as nn
+import torch.optim as optim
 
 from disaster_tweets.tweet_data import DisasterTweetDataset, SplitType
 
 
-class LinearTweetClassifier(Module):
-    def __init__(self, n_nodes: int) -> None:
+class LinearTweetClassifier(nn.Module):
+    def __init__(self, vocab_size: int, embed_dim: int, n_classes: int) -> None:
         super().__init__()
-        self.fc1 = Linear(in_features=n_nodes, out_features=1)
+        self.embedding = nn.EmbeddingBag(vocab_size, embed_dim, sparse=True)
+        self.fc = nn.Linear(in_features=embed_dim, out_features=n_classes)
+        self.init_weights()
 
-    def forward(self, x_in, apply_sigmoid=False):
-        y_out = self.fc1(x_in).squeeze()
-        if apply_sigmoid:
-            y_out = sigmoid(y_out)
-        return y_out
+    def init_weights(self):
+        initrange = 0.5
+        self.embedding.weight.data.uniform_(-initrange, initrange)
+        self.fc.weight.data.uniform_(-initrange, initrange)
+        self.fc.bias.data.zero_()
+
+    def forward(self, text, offsets):
+        embedded = self.embedding(text, offsets)
+        return self.fc(embedded)
 
 
 class RunningValue(object):
@@ -37,66 +44,82 @@ def compute_accuracy(y_pred, y_target):
     return n_correct / len(y_pred_indices) * 100
 
 
+def generate_batch(batch):
+    label = torch.tensor([entry["y_target"] for entry in batch]).long()
+    text = [torch.from_numpy(entry['x_data']).long() for entry in batch]
+    offsets = [0] + [len(entry) for entry in text]
+
+    offsets = torch.tensor(offsets[:-1])
+    text = torch.cat(text)
+    return text, offsets, label
+
+
 def trainer(
     dataset: DisasterTweetDataset,
-    model: Module,
-    optimizer: Optimizer,
+    model: nn.Module,
+    optimizer: optim.Optimizer,
     loss_func,
     num_epochs: int,
     batch_size: int,
     shuffle: bool = True,
-    drop_last: bool = True,
-    device: str = "cpu",
+    device: torch.device = torch.device("cpu")
 ):
-    train_state = {}
     for epoch in tqdm(range(num_epochs)):
-        train_state["epoch_index"] = epoch
+        train_acc = 0.0
+        train_loss = 0.0
+        count = 0
 
         dataset.set_split(SplitType.TRAIN)
-
-        running_loss = RunningValue(batch_size)
-        running_acc = RunningValue(batch_size)
+        data_loader = DataLoader(
+            dataset, 
+            batch_size=batch_size, 
+            shuffle=shuffle,
+            collate_fn=generate_batch,
+        )
 
         model.train()
-        dataloader = DataLoader(
-            dataset=dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last
-        )
-        for batch_idx, batch_data in enumerate(dataloader):
-            batch_data = {name: tensor.to(device) for name, tensor in batch_data.items()}
-
+        for text, offsets, target in data_loader:
             optimizer.zero_grad()
-            y_pred = model(x_in=batch_data["x_data"].float())
 
-            loss = loss_func(y_pred, batch_data["y_target"].float())
-            running_loss.add(loss.item())
+            text, offsets, target = text.to(device), offsets.to(device), target.to(device)
+            y_pred = model(text, offsets)
+
+            loss = loss_func(y_pred, target)
+            train_loss += loss.item()
 
             loss.backward()
             optimizer.step()
 
-            running_acc.add(compute_accuracy(y_pred, batch_data["y_target"]))
+            train_acc += (y_pred.argmax(1) == target).sum().item()
+            count += batch_size
 
-        train_state["train_loss"] = running_loss.value
-        train_state["train_acc"] = running_acc.value
+        print(f"{datetime.now()}: Epoch {epoch}: Train Acc {train_acc / count}: Train Loss {train_loss / count}")
 
         dataset.set_split(SplitType.VAL)
+        data_loader = DataLoader(
+            dataset, 
+            batch_size=batch_size, 
+            shuffle=shuffle,
+            collate_fn=generate_batch,
+        )
 
-        running_loss = RunningValue(batch_size)
-        running_acc = RunningValue(batch_size)
+        val_loss = 0.0
+        val_acc = 0.0
+        count = 0.0
 
         model.eval()
-        for batch_idx, batch_data in enumerate(dataloader):
-            batch_data = {name: tensor.to(device) for name, tensor in batch_data.items()}
+        for text, offsets, target in data_loader:
+            text, offsets, target = text.to(device), offsets.to(device), target.to(device)
 
-            y_pred = model(x_in=batch_data["x_data"].float())
+            y_pred = model(text, offsets)
 
-            loss = loss_func(y_pred, batch_data["y_target"].float())
-            running_loss.add(loss.item())
-            running_acc.add(compute_accuracy(y_pred, batch_data["y_target"]))
+            loss = loss_func(y_pred, target)
 
-        train_state["val_loss"] = running_loss.value
-        train_state["val_acc"] = running_acc.value
+            val_loss += loss.item()
+            val_acc += (y_pred.argmax(1) == target).sum().item()
+            count += batch_size
 
-        print(train_state)
+        print(f"{datetime.now()}: Epoch {epoch}: Val Acc {val_acc / count}: Val Loss {val_loss / count}")
 
 
 @click.command()
@@ -104,19 +127,19 @@ def trainer(
 @click.option("--learning-rate", default=0.001, type=float)
 @click.option("--batch-size", default=128, type=int)
 @click.option("--num-epochs", default=100, type=int)
+@click.option("--layer-size", default=32, type=int)
 def main(dataset_file: str, **kwargs):
-    device = "cpu"
-    if torch.cuda.is_available():
-        device = "cuda:0"
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    print(f"Using {device}")
 
     dataset = DisasterTweetDataset.from_csv(dataset_file)
-    n_features = len(dataset.tweet_vectorizer.vocab)
+    vocab_size = len(dataset.tweet_vectorizer.vocab)
 
-    model = LinearTweetClassifier(n_nodes=n_features)
+    model = LinearTweetClassifier(vocab_size, kwargs["layer_size"], n_classes=2)
     model.to(device)
 
-    loss_func = BCEWithLogitsLoss()
-    optimizer = Adam(model.parameters(), lr=kwargs["learning_rate"])
+    loss_func = nn.CrossEntropyLoss().to(device)
+    optimizer = optim.SGD(model.parameters(), lr=kwargs["learning_rate"])
 
     trainer(
         dataset,
